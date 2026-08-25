@@ -10,8 +10,11 @@ import io.horizontalsystems.ethereumkit.models.TransactionData
 import io.horizontalsystems.uniswapkit.contract.GetReservesMethod
 import io.horizontalsystems.uniswapkit.contract.SwapETHForExactTokensMethod
 import io.horizontalsystems.uniswapkit.contract.SwapExactETHForTokensMethod
+import io.horizontalsystems.uniswapkit.contract.SwapExactETHForTokensSupportingFeeOnTransferTokensMethod
 import io.horizontalsystems.uniswapkit.contract.SwapExactTokensForETHMethod
+import io.horizontalsystems.uniswapkit.contract.SwapExactTokensForETHSupportingFeeOnTransferTokensMethod
 import io.horizontalsystems.uniswapkit.contract.SwapExactTokensForTokensMethod
+import io.horizontalsystems.uniswapkit.contract.SwapExactTokensForTokensSupportingFeeOnTransferTokensMethod
 import io.horizontalsystems.uniswapkit.contract.SwapTokensForExactETHMethod
 import io.horizontalsystems.uniswapkit.contract.SwapTokensForExactTokensMethod
 import io.horizontalsystems.uniswapkit.models.*
@@ -24,6 +27,11 @@ import java.util.logging.Logger
 
 class TradeManager {
     private val logger = Logger.getLogger(this.javaClass.simpleName)
+
+    sealed class FeeOnTransferError : Throwable() {
+        object ExactOutNotSupported : FeeOnTransferError()
+        object ZeroAmountOutMin : FeeOnTransferError()
+    }
 
     sealed class UnsupportedChainError : Throwable() {
         object NoRouterAddress : UnsupportedChainError()
@@ -100,6 +108,13 @@ class TradeManager {
     }
 
     private fun buildMethodForExactOut(tokenIn: Token, tokenOut: Token, path: List<Address>, to: Address, deadline: BigInteger, tradeData: TradeData, trade: Trade): ContractMethod {
+        // The V2 routers deliberately expose no exact-out fee-on-transfer function: the input
+        // needed to land an exact output is not knowable in advance once a transfer tax is
+        // skimmed. Fail loudly here instead of silently encoding a call that reverts with `K`.
+        if (tradeData.options.feeOnTransfer) {
+            throw FeeOnTransferError.ExactOutNotSupported
+        }
+
         val amountInMax = tradeData.tokenAmountInMax.rawAmount
         val amountOut = trade.tokenAmountOut.rawAmount
 
@@ -114,6 +129,25 @@ class TradeManager {
     private fun buildMethodForExactIn(tokenIn: Token, tokenOut: Token, path: List<Address>, to: Address, deadline: BigInteger, tradeData: TradeData, trade: Trade): ContractMethod {
         val amountIn = trade.tokenAmountIn.rawAmount
         val amountOutMin = tradeData.tokenAmountOutMin.rawAmount
+
+        if (tradeData.options.feeOnTransfer) {
+            // These routers revert with INSUFFICIENT_OUTPUT_AMOUNT on a zero minimum, and a
+            // zero minimum would also mean unbounded slippage on exactly the token class most
+            // likely to be adversarial.
+            if (amountOutMin <= BigInteger.ZERO) {
+                throw FeeOnTransferError.ZeroAmountOutMin
+            }
+
+            return when {
+                tokenIn is Ether && tokenOut is Erc20 ->
+                    SwapExactETHForTokensSupportingFeeOnTransferTokensMethod(amountOutMin, path, to, deadline)
+                tokenIn is Erc20 && tokenOut is Ether ->
+                    SwapExactTokensForETHSupportingFeeOnTransferTokensMethod(amountIn, amountOutMin, path, to, deadline)
+                tokenIn is Erc20 && tokenOut is Erc20 ->
+                    SwapExactTokensForTokensSupportingFeeOnTransferTokensMethod(amountIn, amountOutMin, path, to, deadline)
+                else -> throw Exception("Invalid tokenIn/Out for swap!")
+            }
+        }
 
         return when {
             tokenIn is Ether && tokenOut is Erc20 -> SwapExactETHForTokensMethod(amountOutMin, path, to, deadline)

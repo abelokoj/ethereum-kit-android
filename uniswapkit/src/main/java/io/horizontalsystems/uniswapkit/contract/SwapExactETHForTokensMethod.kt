@@ -4,7 +4,7 @@ import io.horizontalsystems.ethereumkit.contracts.ContractMethod
 import io.horizontalsystems.ethereumkit.models.Address
 import java.math.BigInteger
 
-class SwapExactETHForTokensMethod(
+open class SwapExactETHForTokensMethod(
         val amountOutMin: BigInteger,
         val path: List<Address>,
         val to: Address,
