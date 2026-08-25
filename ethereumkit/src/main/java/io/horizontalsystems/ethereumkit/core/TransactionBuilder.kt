@@ -50,6 +50,28 @@ class TransactionBuilder(
                 )
             } ?: arrayOf()
 
+            if (rawTransaction.isSetCode) {
+                val gasPrice = rawTransaction.gasPrice
+                require(gasPrice is GasPrice.Eip1559) {
+                    "EIP-7702 transactions require EIP-1559 gas; there is no legacy-gas form"
+                }
+
+                val elements = arrayOf(
+                        RLP.encodeInt(chainId),
+                        RLP.encodeLong(rawTransaction.nonce),
+                        RLP.encodeLong(gasPrice.maxPriorityFeePerGas),
+                        RLP.encodeLong(gasPrice.maxFeePerGas),
+                        RLP.encodeLong(rawTransaction.gasLimit),
+                        RLP.encodeElement(rawTransaction.to.raw),
+                        RLP.encodeBigInteger(rawTransaction.value),
+                        RLP.encodeElement(rawTransaction.data),
+                        RLP.encode(arrayOf<Any>()),
+                        AuthorizationSigner.encodeList(rawTransaction.authorizationList)
+                ) + signatureArray
+
+                return "0x04".hexStringToByteArray() + RLP.encodeList(*elements)
+            }
+
             return when (rawTransaction.gasPrice) {
                 is GasPrice.Eip1559 -> {
                     val elements = arrayOf(
