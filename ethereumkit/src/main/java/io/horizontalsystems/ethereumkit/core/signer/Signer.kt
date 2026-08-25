@@ -44,6 +44,35 @@ class Signer(
         return transactionBuilder.encode(rawTransaction, signature)
     }
 
+    /**
+     * Signs an EIP-7702 (type 0x04) transaction carrying [authorizationList].
+     *
+     * For the batch approve+swap case the caller signs a self-delegation with
+     * [io.horizontalsystems.ethereumkit.core.AuthorizationSigner.selfSign] and points
+     * [address] at its own EOA, so the delegated code executes both calls in one go.
+     */
+    fun signedTransaction(
+        address: Address,
+        value: BigInteger,
+        transactionInput: ByteArray,
+        gasPrice: GasPrice,
+        gasLimit: Long,
+        nonce: Long,
+        authorizationList: List<Authorization>
+    ): ByteArray {
+        val rawTransaction = RawTransaction(
+            gasPrice,
+            gasLimit,
+            address,
+            value,
+            nonce,
+            transactionInput,
+            authorizationList
+        )
+        val signature = transactionSigner.signature(rawTransaction)
+        return transactionBuilder.encode(rawTransaction, signature)
+    }
+
     fun signByteArray(message: ByteArray): ByteArray {
         return ethSigner.signByteArray(message)
     }
